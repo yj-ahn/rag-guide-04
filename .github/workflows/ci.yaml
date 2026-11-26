@@ -48,3 +48,18 @@ jobs:
           aws ecr get-login-password | docker login -u AWS --password-stdin ${REPO%%/*}
           docker tag rag-guide:${{ github.sha }} $REPO:${{ github.sha }}
           docker push $REPO:${{ github.sha }}
+
+  deploy-canary:
+    needs: gate
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with: { role-to-assume: "${{ secrets.AWS_ROLE_ARN }}", aws-region: ap-northeast-2 }
+      - name: kubeconfig
+        run: aws eks update-kubeconfig --name ${{ vars.EKS_CLUSTER }} --region ap-northeast-2
+      - name: canary 배포
+        run: |
+          kubectl -n rag set image deployment/rag-canary api=${{ vars.ECR_REPO }}:${{ github.sha }}
+          kubectl -n rag annotate deployment/rag-canary kubernetes.io/change-cause="ci ${{ github.sha }}" --overwrite
+          kubectl -n rag rollout status deployment/rag-canary --timeout=180s
