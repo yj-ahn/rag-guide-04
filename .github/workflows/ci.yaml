@@ -1,0 +1,50 @@
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write      # OIDC 토큰 발급
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  AWS_REGION: ap-northeast-2
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -r requirements.txt
+      - name: 릴리스 설정 읽기 (평가할 프롬프트 버전)
+        run: cat config/release.env >> "$GITHUB_ENV"
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: 색인 생성
+        run: python -m app.index
+      - name: 품질 평가 (질문 30 + 공격 10)
+        run: python -m eval.run_eval
+        env: { EVAL_THRESHOLD: "0.85" }
+      - name: 비밀 정보 검사
+        run: docker run --rm -v ${{ github.workspace }}:/repo zricethezav/gitleaks:v8.21.2 detect --source /repo
+      - name: 의존성 취약점 검사
+        run: pip install pip-audit && pip-audit -r requirements.txt
+      - name: 이미지 빌드
+        run: docker build --build-arg APP_VERSION=${{ github.sha }} -t rag-guide:${{ github.sha }} .
+      - name: ECR 등록 (main만)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          REPO=${{ vars.ECR_REPO }}
+          aws ecr get-login-password | docker login -u AWS --password-stdin ${REPO%%/*}
+          docker tag rag-guide:${{ github.sha }} $REPO:${{ github.sha }}
+          docker push $REPO:${{ github.sha }}
