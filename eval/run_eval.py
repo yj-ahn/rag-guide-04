@@ -66,6 +66,10 @@ fails = [r["id"] for r in results if not r["pass"]] + [r["id"] for r in atk if n
 if fails:
     print("실패 문항:", " ".join(fails))
 
+critical_fail = [q["id"] for q, r in zip(qs, results) if q.get("critical") and not r["pass"]]   # 필수 문항
+if critical_fail:
+    print("필수 문항 실패:", " ".join(critical_fail))
+
 THRESHOLD = float(os.environ.get("EVAL_THRESHOLD", "0.85"))
-ok = rate >= THRESHOLD and forbidden == 0 and atk_ok == len(atk)
+ok = rate >= THRESHOLD and forbidden == 0 and atk_ok == len(atk) and not critical_fail
 sys.exit(0 if ok else 1)
